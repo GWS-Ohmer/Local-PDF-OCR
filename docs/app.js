@@ -1,3 +1,7 @@
+let jsPDF;
+let dropZone, fileInput, fileList, startBtn, progressContainer, progressBar, statusText, previewText;
+let selectedFiles = [];
+
 document.addEventListener('DOMContentLoaded', () => {
     // Wait until libraries are definitely loaded
     if (window.pdfjsLib) {
@@ -6,18 +10,26 @@ document.addEventListener('DOMContentLoaded', () => {
         console.error("PDF.js library failed to load.");
     }
 
-    const dropZone = document.getElementById('dropZone');
-    const fileInput = document.getElementById('fileInput');
-    const fileList = document.getElementById('fileList');
-    const startBtn = document.getElementById('startBtn');
-    const progressContainer = document.getElementById('progressContainer');
-    const progressBar = document.getElementById('progressBar');
-    const statusText = document.getElementById('statusText');
-    const previewText = document.getElementById('previewText');
+    if (window.jspdf && window.jspdf.jsPDF) {
+        jsPDF = window.jspdf.jsPDF;
+    } else {
+        console.error("jsPDF library failed to load.");
+    }
 
-    let selectedFiles = [];
+    dropZone = document.getElementById('dropZone');
+    fileInput = document.getElementById('fileInput');
+    fileList = document.getElementById('fileList');
+    startBtn = document.getElementById('startBtn');
+    progressContainer = document.getElementById('progressContainer');
+    progressBar = document.getElementById('progressBar');
+    statusText = document.getElementById('statusText');
+    previewText = document.getElementById('previewText');
 
     // Drag and Drop Handlers
+    dropZone.addEventListener('click', () => {
+        fileInput.click();
+    });
+    
     dropZone.addEventListener('dragover', (e) => { 
         e.preventDefault(); 
         dropZone.style.background = '#e9ecef'; 
@@ -36,7 +48,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     fileInput.addEventListener('change', (e) => {
-        if (e.target.files) {
+        if (e.target.files && e.target.files.length > 0) {
             handleFiles(e.target.files);
         }
     });
@@ -120,9 +132,7 @@ async function processPDF(file, fileIndex, totalFiles) {
         // Run OCR
         const { data } = await worker.recognize(canvas);
         
-        totalText += `
---- Page ${pageNum} ---
-`;
+        totalText += "\n--- Page " + pageNum + " ---\n";
         let hasText = false;
 
         if (data.words && data.words.length > 0) {
@@ -150,8 +160,7 @@ async function processPDF(file, fileIndex, totalFiles) {
         }
         if(!hasText) totalText += "[No text found]";
         
-        previewText.innerText = "Extracted Text Preview: 
-" + totalText.substring(Math.max(0, totalText.length - 150)) + "...";
+        previewText.innerText = "Extracted Text Preview: \n" + totalText.substring(Math.max(0, totalText.length - 150)) + "...";
     }
 
     await worker.terminate();
