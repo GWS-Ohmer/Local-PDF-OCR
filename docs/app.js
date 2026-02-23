@@ -135,27 +135,29 @@ async function processPDF(file, fileIndex, totalFiles) {
         totalText += "\n--- Page " + pageNum + " ---\n";
         let hasText = false;
 
-        if (data.words && data.words.length > 0) {
-            data.words.forEach(word => {
-                if (!word.text.trim()) return;
+        if (data.lines && data.lines.length > 0) {
+            data.lines.forEach(line => {
+                const text = line.text.replace(/\n/g, '').trim();
+                if (!text) return;
                 hasText = true;
-                totalText += word.text + " ";
+                totalText += text + "\n";
                 
                 // Scale bbox back to viewport 1.0
-                const x = word.bbox.x0 / ocrScale;
-                const y = word.bbox.y0 / ocrScale;
-                const w = (word.bbox.x1 - word.bbox.x0) / ocrScale;
-                const h = (word.bbox.y1 - word.bbox.y0) / ocrScale;
+                const x = line.bbox.x0 / ocrScale;
+                const y = line.bbox.y0 / ocrScale;
+                const w = (line.bbox.x1 - line.bbox.x0) / ocrScale;
+                const h = (line.bbox.y1 - line.bbox.y0) / ocrScale;
 
                 // Adjust baseline
                 const fontSize = h > 0 ? h : 10;
+                // PDF text baseline is at the bottom, but usually ~80% of the box height
                 const baselineY = y + h * 0.8;
 
                 outPdf.setFontSize(fontSize);
                 outPdf.setTextColor(0, 0, 0); 
                 
                 // Get jsPDF's internal width calculation for this text
-                const textWidth = outPdf.getStringUnitWidth(word.text) * fontSize / outPdf.internal.scaleFactor;
+                const textWidth = outPdf.getStringUnitWidth(text) * fontSize / outPdf.internal.scaleFactor;
                 
                 // Calculate how much we need to stretch/shrink the text to match the image exactly
                 let scaleX = 100;
@@ -164,8 +166,7 @@ async function processPDF(file, fileIndex, totalFiles) {
                 }
 
                 // renderingMode: "invisible" allows the text to be highlighted but not seen
-                // charSpace helps align it perfectly horizontally
-                outPdf.text(word.text, x, baselineY, { 
+                outPdf.text(text, x, baselineY, { 
                     renderingMode: "invisible",
                     horizontalScale: scaleX
                 });
