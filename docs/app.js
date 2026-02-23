@@ -154,8 +154,21 @@ async function processPDF(file, fileIndex, totalFiles) {
                 outPdf.setFontSize(fontSize);
                 outPdf.setTextColor(0, 0, 0); 
                 
+                // Get jsPDF's internal width calculation for this text
+                const textWidth = outPdf.getStringUnitWidth(word.text) * fontSize / outPdf.internal.scaleFactor;
+                
+                // Calculate how much we need to stretch/shrink the text to match the image exactly
+                let scaleX = 100;
+                if (textWidth > 0 && w > 0) {
+                    scaleX = (w / textWidth) * 100;
+                }
+
                 // renderingMode: "invisible" allows the text to be highlighted but not seen
-                outPdf.text(word.text, x, baselineY, { renderingMode: "invisible" });
+                // charSpace helps align it perfectly horizontally
+                outPdf.text(word.text, x, baselineY, { 
+                    renderingMode: "invisible",
+                    horizontalScale: scaleX
+                });
             });
         }
         if(!hasText) totalText += "[No text found]";
