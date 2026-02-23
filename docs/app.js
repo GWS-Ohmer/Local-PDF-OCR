@@ -18,10 +18,6 @@ document.addEventListener('DOMContentLoaded', () => {
     let selectedFiles = [];
 
     // Drag and Drop Handlers
-    dropZone.addEventListener('click', () => {
-        fileInput.click();
-    });
-    
     dropZone.addEventListener('dragover', (e) => { 
         e.preventDefault(); 
         dropZone.style.background = '#e9ecef'; 
