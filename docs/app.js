@@ -1,68 +1,81 @@
-try {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-} catch (e) {
-    alert("Error loading PDF.js: " + e.message);
-}
+document.addEventListener('DOMContentLoaded', () => {
+    // Wait until libraries are definitely loaded
+    if (window.pdfjsLib) {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    } else {
+        console.error("PDF.js library failed to load.");
+    }
 
-let jsPDF;
-try {
-    jsPDF = window.jspdf.jsPDF;
-} catch (e) {
-    alert("Error loading jsPDF: " + e.message);
-}
+    const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('fileInput');
+    const fileList = document.getElementById('fileList');
+    const startBtn = document.getElementById('startBtn');
+    const progressContainer = document.getElementById('progressContainer');
+    const progressBar = document.getElementById('progressBar');
+    const statusText = document.getElementById('statusText');
+    const previewText = document.getElementById('previewText');
 
-const dropZone = document.getElementById('dropZone');
-const fileInput = document.getElementById('fileInput');
-const fileList = document.getElementById('fileList');
-const startBtn = document.getElementById('startBtn');
-const progressContainer = document.getElementById('progressContainer');
-const progressBar = document.getElementById('progressBar');
-const statusText = document.getElementById('statusText');
-const previewText = document.getElementById('previewText');
+    let selectedFiles = [];
 
-let selectedFiles = [];
-
-// Drag and Drop Handlers
-dropZone.addEventListener('click', () => fileInput.click());
-dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.style.background = '#e9ecef'; });
-dropZone.addEventListener('dragleave', () => dropZone.style.background = '#fff');
-dropZone.addEventListener('drop', (e) => {
-    e.preventDefault();
-    dropZone.style.background = '#fff';
-    handleFiles(e.dataTransfer.files);
-});
-
-fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
-
-function handleFiles(files) {
-    for (let i = 0; i < files.length; i++) {
-        if (files[i].type === 'application/pdf') {
-            selectedFiles.push(files[i]);
-            const p = document.createElement('p');
-            p.textContent = `📄 ${files[i].name}`;
-            p.className = 'mb-1 font-monospace';
-            fileList.appendChild(p);
+    // Drag and Drop Handlers
+    dropZone.addEventListener('click', () => {
+        fileInput.click();
+    });
+    
+    dropZone.addEventListener('dragover', (e) => { 
+        e.preventDefault(); 
+        dropZone.style.background = '#e9ecef'; 
+    });
+    
+    dropZone.addEventListener('dragleave', () => {
+        dropZone.style.background = '#fff';
+    });
+    
+    dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.style.background = '#fff';
+        if (e.dataTransfer.files) {
+            handleFiles(e.dataTransfer.files);
         }
+    });
+
+    fileInput.addEventListener('change', (e) => {
+        if (e.target.files) {
+            handleFiles(e.target.files);
+        }
+    });
+
+    function handleFiles(files) {
+        for (let i = 0; i < files.length; i++) {
+            if (files[i].type === 'application/pdf') {
+                selectedFiles.push(files[i]);
+                const p = document.createElement('p');
+                p.textContent = `📄 ${files[i].name}`;
+                p.className = 'mb-1 font-monospace';
+                fileList.appendChild(p);
+            }
+        }
+        if (selectedFiles.length > 0) startBtn.disabled = false;
     }
-    if (selectedFiles.length > 0) startBtn.disabled = false;
-}
 
-startBtn.addEventListener('click', async () => {
-    startBtn.disabled = true;
-    dropZone.style.pointerEvents = 'none';
-    progressContainer.style.display = 'block';
+    startBtn.addEventListener('click', async () => {
+        startBtn.disabled = true;
+        dropZone.style.pointerEvents = 'none';
+        progressContainer.style.display = 'block';
 
-    for (let i = 0; i < selectedFiles.length; i++) {
-        await processPDF(selectedFiles[i], i, selectedFiles.length);
-    }
+        for (let i = 0; i < selectedFiles.length; i++) {
+            await processPDF(selectedFiles[i], i, selectedFiles.length);
+        }
 
-    statusText.innerText = "All PDFs processed successfully!";
-    progressBar.style.width = '100%';
-    progressBar.classList.remove('progress-bar-animated');
-    startBtn.disabled = false;
-    dropZone.style.pointerEvents = 'auto';
-    selectedFiles = [];
-    fileList.innerHTML = '';
+        statusText.innerText = "All PDFs processed successfully!";
+        progressBar.style.width = '100%';
+        progressBar.classList.remove('progress-bar-animated');
+        startBtn.disabled = false;
+        dropZone.style.pointerEvents = 'auto';
+        selectedFiles = [];
+        fileList.innerHTML = '';
+        fileInput.value = ''; // Reset input
+    });
 });
 
 async function processPDF(file, fileIndex, totalFiles) {
