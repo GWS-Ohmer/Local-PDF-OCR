@@ -135,42 +135,77 @@ async function processPDF(file, fileIndex, totalFiles) {
         totalText += "\n--- Page " + pageNum + " ---\n";
         let hasText = false;
 
-        if (data.lines && data.lines.length > 0) {
-            // Sort lines to ensure proper reading order (Top to Bottom, then Left to Right)
-            const sortedLines = [...data.lines].sort((a, b) => {
-                const yDiff = a.bbox.y0 - b.bbox.y0;
-                // If lines are within 10 pixels vertically, treat them as same line and sort by X
-                if (Math.abs(yDiff) < 10) {
-                    return a.bbox.x0 - b.bbox.x0;
-                }
-                return yDiff;
-            });
+                // Use Tesseract's natural word blocks for accurate copy-paste
+        if (data.blocks && data.blocks.length > 0) {
+            data.blocks.forEach(block => {
+                if (block.paragraphs) {
+                    block.paragraphs.forEach(paragraph => {
+                        if (paragraph.lines) {
+                            paragraph.lines.forEach(line => {
+                                if (line.words) {
+                                    line.words.forEach(word => {
+                                        const text = word.text.trim();
+                                        if (!text) return;
+                                        hasText = true;
+                                        totalText += text + " ";
 
-            sortedLines.forEach(line => {
+                                        const x = word.bbox.x0 / ocrScale;
+                                        const y = word.bbox.y0 / ocrScale;
+                                        const w = (word.bbox.x1 - word.bbox.x0) / ocrScale;
+                                        const h = (word.bbox.y1 - word.bbox.y0) / ocrScale;
+
+                                        const fontSize = h > 0 ? h : 10;
+                                        // The baseline in Tesseract is often slightly above the bottom of the bounding box
+                                        // For PDF invisible text, placing it precisely at the bottom left helps selection flow
+                                        const baselineY = word.bbox.y1 / ocrScale;
+
+                                        outPdf.setFontSize(fontSize);
+                                        outPdf.setTextColor(0, 0, 0);
+
+                                        const textWidth = outPdf.getStringUnitWidth(text) * fontSize / outPdf.internal.scaleFactor;
+
+                                        let scaleX = 100;
+                                        if (textWidth > 0 && w > 0) {
+                                            scaleX = (w / textWidth) * 100;
+                                        }
+
+                                        outPdf.text(text, x, baselineY, {
+                                            renderingMode: "invisible",
+                                            horizontalScale: scaleX
+                                        });
+                                    });
+                                }
+                            });
+                        }
+                    });
+                }
+            });
+        } else if (data.lines && data.lines.length > 0) { // Fallback to lines if words are missing
+             data.lines.forEach(line => {
                 const text = line.text.replace(/\n/g, '').trim();
                 if (!text) return;
                 hasText = true;
                 totalText += text + "\n";
-                
+
                 const x = line.bbox.x0 / ocrScale;
                 const y = line.bbox.y0 / ocrScale;
                 const w = (line.bbox.x1 - line.bbox.x0) / ocrScale;
                 const h = (line.bbox.y1 - line.bbox.y0) / ocrScale;
 
                 const fontSize = h > 0 ? h : 10;
-                const baselineY = y + h * 0.85; // Slightly lower baseline for better highlight alignment
+                const baselineY = line.bbox.y1 / ocrScale; // Use bottom of bounding box as baseline to match Python behavior
 
                 outPdf.setFontSize(fontSize);
-                outPdf.setTextColor(0, 0, 0); 
-                
+                outPdf.setTextColor(0, 0, 0);
+
                 const textWidth = outPdf.getStringUnitWidth(text) * fontSize / outPdf.internal.scaleFactor;
-                
+
                 let scaleX = 100;
                 if (textWidth > 0 && w > 0) {
                     scaleX = (w / textWidth) * 100;
                 }
 
-                outPdf.text(text, x, baselineY, { 
+                outPdf.text(text, x, baselineY, {
                     renderingMode: "invisible",
                     horizontalScale: scaleX
                 });
@@ -186,3 +221,6 @@ async function processPDF(file, fileIndex, totalFiles) {
     statusText.innerText = `Saving ${file.name.replace('.pdf', '_Searchable.pdf')}...`;
     outPdf.save(file.name.replace('.pdf', '_Searchable.pdf'));
 }
+
+
+
