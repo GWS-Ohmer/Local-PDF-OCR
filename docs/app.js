@@ -1,5 +1,15 @@
-pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-const { jsPDF } = window.jspdf;
+try {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+} catch (e) {
+    alert("Error loading PDF.js: " + e.message);
+}
+
+let jsPDF;
+try {
+    jsPDF = window.jspdf.jsPDF;
+} catch (e) {
+    alert("Error loading jsPDF: " + e.message);
+}
 
 const dropZone = document.getElementById('dropZone');
 const fileInput = document.getElementById('fileInput');
