@@ -82,7 +82,7 @@ async function processPDF(file, fileIndex, totalFiles) {
         progressBar.style.width = (((fileIndex * pdf.numPages) + pageNum - 1) / (totalFiles * pdf.numPages) * 100) + "%";
 
         const page = await pdf.getPage(pageNum);
-        // viewport declared earlier
+        const viewport = page.getViewport({ scale: 1.0 });
 
         if (!outPdf) {
             outPdf = new jsPDF({
@@ -96,9 +96,6 @@ async function processPDF(file, fileIndex, totalFiles) {
         }
 
         const ocrScale = 2.0;
-        // Let PDF.js handle the viewport naturally, including any built-in rotation.
-        // This means the image we see on canvas is exactly what the user sees.
-        // viewport declared earlier
         const ocrViewport = page.getViewport({ scale: ocrScale });
         
         const canvas = document.createElement('canvas');
@@ -107,12 +104,9 @@ async function processPDF(file, fileIndex, totalFiles) {
         canvas.height = ocrViewport.height;
 
         await page.render({ canvasContext: ctx, viewport: ocrViewport }).promise;
-        
-        // Draw the naturally rendered image onto the PDF
         const imgData = canvas.toDataURL('image/jpeg', 0.85);
         outPdf.addImage(imgData, 'JPEG', 0, 0, viewport.width, viewport.height);
 
-        // Run OCR. Tesseract will automatically detect if the text inside the image is sideways.
         const { data } = await worker.recognize(canvas);
         
         let words = [];
@@ -132,7 +126,6 @@ async function processPDF(file, fileIndex, totalFiles) {
         let hasPageText = false;
 
         if (words.length > 0) {
-            // Sort words by Y primarily, then X. This ensures the text stream in the PDF is logical.
             words.sort((a, b) => {
                 const yDiff = a.bbox.y0 - b.bbox.y0;
                 if (Math.abs(yDiff) < 15) return a.bbox.x0 - b.bbox.x0;
@@ -141,20 +134,17 @@ async function processPDF(file, fileIndex, totalFiles) {
 
             words.forEach(word => {
                 let text = word.text.trim();
-                // Strip non-printable characters to prevent width calculation errors
                 text = text.replace(/[^\x20-\x7E]/g, '');
                 if (!text) return;
                 
                 hasPageText = true;
                 totalText += text + " ";
 
-                // Base coordinates in PDF points
                 const x = word.bbox.x0 / ocrScale;
                 const y = word.bbox.y0 / ocrScale;
                 const w = (word.bbox.x1 - word.bbox.x0) / ocrScale;
                 const h = (word.bbox.y1 - word.bbox.y0) / ocrScale;
 
-                // Set font size to match box height, capped for safety
                 const fontSize = Math.max(1, Math.min(h, 72));
                 outPdf.setFontSize(fontSize);
                 outPdf.setFont("Helvetica");
@@ -170,34 +160,22 @@ async function processPDF(file, fileIndex, totalFiles) {
                     if (textWidth > 1 && w > 1) {
                         scaleX = (w / textWidth) * 100;
                     }
-                    // STRICT CAP: Scale between 50% and 150%. 
-                    // Values outside this cause the "whole page highlight" bug.
                     scaleX = Math.max(50, Math.min(scaleX, 150));
 
-                    // Use charSpace as a fallback or if scaleX is near 100
                     let charSpace = 0;
                     if (scaleX === 150 && text.length > 1) {
                         const remainingW = w - (textWidth * 1.5);
                         if (remainingW > 0) charSpace = remainingW / (text.length - 1);
                     }
 
-                    // Determine if Tesseract found this word to be rotated
                     let angle = 0;
-                    // If the word's bounding box is significantly taller than it is wide, 
-                    // and it has multiple characters, it's likely vertical text (rotated 90 or -90).
-                    // In Tesseract, the bbox naturally wraps the upright text.
                     if (word.baseline && word.baseline.angle !== undefined) {
                         angle = word.baseline.angle;
                     } else if (h > (w * 1.5) && text.length > 2) {
-                        // Heuristic for vertical text if no baseline angle is provided
-                        angle = 90; 
+                        angle = 90;
                     }
 
-                    // Tesseract angle might need adjustment for jsPDF
-                    // jsPDF expects counter-clockwise angles in degrees
-                    
                     if (angle !== 0) {
-                         // Swap width and height for font sizing if it's strictly vertical
                          if (Math.abs(angle) === 90) {
                              outPdf.setFontSize(Math.max(1, Math.min(w, 72)));
                          }
@@ -207,7 +185,7 @@ async function processPDF(file, fileIndex, totalFiles) {
                         renderingMode: "invisible",
                         horizontalScale: scaleX,
                         charSpace: Math.min(charSpace, 5),
-                        angle: angle // Apply rotation to the text
+                        angle: angle 
                     });
                 }
             });
@@ -221,6 +199,3 @@ async function processPDF(file, fileIndex, totalFiles) {
     statusText.innerText = "Saving " + file.name.replace('.pdf', '_Searchable.pdf') + "...";
     outPdf.save(file.name.replace('.pdf', '_Searchable.pdf'));
 }
-
-
-
