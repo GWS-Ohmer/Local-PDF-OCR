@@ -158,15 +158,15 @@ async function processPDF(file, fileIndex, totalFiles) {
 
                 const fontSize = Math.max(1, Math.min(h, 72));
                 outPdf.setFontSize(fontSize);
-                outPdf.setFont("Helvetica");
 
                 if (isDebug) {
                     outPdf.setDrawColor(255, 0, 0);
                     outPdf.rect(x, y, w, h);
                     outPdf.setTextColor(255, 0, 0);
-                    outPdf.text(text, x, y + (h * 0.8), { renderingMode: "visible" });
+                    outPdf.text(text, x, y + (h * 0.85), { renderingMode: "visible" });
                 } else {
-                    const textWidth = outPdf.getTextWidth(text);
+                    // Calculate expected width of the text at this font size
+                    const textWidth = outPdf.getStringUnitWidth(text) * fontSize / outPdf.internal.scaleFactor;
                     let scaleX = 100;
                     if (textWidth > 1 && w > 1) {
                         scaleX = (w / textWidth) * 100;
@@ -215,4 +215,5 @@ async function processPDF(file, fileIndex, totalFiles) {
     statusText.innerText = "Saving " + file.name.replace('.pdf', '_Searchable.pdf') + "...";
     outPdf.save(file.name.replace('.pdf', '_Searchable.pdf'));
 }
+
 
