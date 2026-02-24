@@ -140,8 +140,7 @@ async function processPDF(file, fileIndex, totalFiles) {
         totalText += "\n--- Page " + pageNum + " ---\n";
         let hasText = false;
 
-                // Tesseract v5 often nests words inside blocks/paragraphs/lines
-        // We flatten them to ensure we don't miss anything and process in reading order
+                // Flatten and sort words to ensure logical selection flow
         let allWords = [];
         if (data.blocks) {
             data.blocks.forEach(b => {
@@ -152,44 +151,47 @@ async function processPDF(file, fileIndex, totalFiles) {
                 });
             });
         }
-        // Fallback to data.words if blocks hierarchy is missing
         if (allWords.length === 0 && data.words) allWords = data.words;
 
         if (allWords.length > 0) {
+            // Sort words: Primary sort by Y (line-by-line), Secondary sort by X (left-to-right)
+            // This is the "Secret Sauce" to smooth PDF text selection
+            allWords.sort((a, b) => {
+                const yDiff = a.bbox.y0 - b.bbox.y0;
+                if (Math.abs(yDiff) < 15) return a.bbox.x0 - b.bbox.x0;
+                return yDiff;
+            });
+
             allWords.forEach(word => {
                 const text = word.text.trim();
-                if (!text || text.length === 0) return;
+                if (!text) return;
                 hasText = true;
                 totalText += text + " ";
 
-                // Map canvas pixels back to PDF points
+                // Coordinates in PDF points
                 const x = word.bbox.x0 / ocrScale;
                 const y = word.bbox.y0 / ocrScale;
                 const w = (word.bbox.x1 - word.bbox.x0) / ocrScale;
                 const h = (word.bbox.y1 - word.bbox.y0) / ocrScale;
 
-                // CRITICAL: Prevent the "whole page highlight" bug by capping font size
-                // and ensuring we don't have impossible dimensions
-                const fontSize = Math.max(1, Math.min(h, 100));
+                // Font size should match word height
+                const fontSize = Math.max(1, Math.min(h, 80));
                 outPdf.setFontSize(fontSize);
 
                 const textWidth = outPdf.getTextWidth(text);
                 
-                // We use a safe horizontal scale instead of charSpace for better word-level alignment
-                // horizontalScale (Tz) is a percentage. 100 = normal.
+                // Use a safe horizontal scale to stretch the invisible text to the word box
                 let scaleX = 100;
-                if (textWidth > 0 && w > 0) {
+                if (textWidth > 1 && w > 1) {
                     scaleX = (w / textWidth) * 100;
                 }
                 
-                // SAFETY: Strictly cap scaleX between 50% and 300%
-                // Values like 1000% or 0% are what cause "random highlighting" or "whole page" bugs
-                scaleX = Math.max(50, Math.min(scaleX, 300));
+                // STATED FIX: Tight cap on scaling (60% to 180%) 
+                // Any wider/narrower and PDF viewers start "randomly" highlighting surrounding areas
+                scaleX = Math.max(60, Math.min(scaleX, 180));
 
-                // Place text at the bottom-left of the word box (baseline)
-                // We use the raw Tz command via a custom jsPDF hook if possible, 
-                // but since we are using word-level, simple placement is usually enough.
-                outPdf.text(text, x, y + (h * 0.9), {
+                // Place text precisely at the word's baseline
+                outPdf.text(text, x, y + (h * 0.85), {
                     renderingMode: "invisible",
                     horizontalScale: scaleX
                 });
@@ -207,6 +209,7 @@ async function processPDF(file, fileIndex, totalFiles) {
     statusText.innerText = `Saving ${file.name.replace('.pdf', '_Searchable.pdf')}...`;
     outPdf.save(file.name.replace('.pdf', '_Searchable.pdf'));
 }
+
 
 
 
