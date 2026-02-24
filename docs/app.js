@@ -96,49 +96,24 @@ async function processPDF(file, fileIndex, totalFiles) {
         }
 
         const ocrScale = 2.0;
-        // CRITICAL FIX: Base viewport scale on un-rotated dimensions to prevent skewing
-        // PDF.js can auto-rotate viewports, which misaligns OCR coordinates. 
-        // We force it to 0 rotation to get the raw page image.
-        const baseViewport = page.getViewport({ scale: ocrScale, rotation: 0 });
+        // Let PDF.js handle the viewport naturally, including any built-in rotation.
+        // This means the image we see on canvas is exactly what the user sees.
+        const viewport = page.getViewport({ scale: 1.0 });
+        const ocrViewport = page.getViewport({ scale: ocrScale });
         
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
-        canvas.width = baseViewport.width;
-        canvas.height = baseViewport.height;
+        canvas.width = ocrViewport.width;
+        canvas.height = ocrViewport.height;
 
-        // Render the raw, un-rotated page
-        await page.render({ canvasContext: ctx, viewport: baseViewport }).promise;
+        await page.render({ canvasContext: ctx, viewport: ocrViewport }).promise;
         
-        // We still need to add the image to the PDF in its proper intended orientation
-        const displayViewport = page.getViewport({ scale: 1.0 });
-        
-        // Run OCR on the RAW canvas. Tesseract will handle script detection natively.
-        const { data } = await worker.recognize(canvas);
-
-        // If the original PDF page was rotated (e.g. 90, 180, 270), we must rotate our OCR coordinates 
-        // to match the final display viewport.
-        const pageRotation = page.rotate || 0;
-        
-        // Add the base image to the PDF, handling PDF.js's built-in rotation display
+        // Draw the naturally rendered image onto the PDF
         const imgData = canvas.toDataURL('image/jpeg', 0.85);
-        if (pageRotation === 0) {
-            outPdf.addImage(imgData, 'JPEG', 0, 0, displayViewport.width, displayViewport.height);
-        } else {
-             // For rotated pages, the simplest approach in jsPDF is to add the raw image 
-             // and let the bounding box math handle the transformation.
-             // However, to keep it simple, we use the displayViewport dims and apply matrix transforms later.
-             // Since jsPDF addImage rotation is tricky, we'll draw the canvas upright.
-             const rotCanvas = document.createElement('canvas');
-             rotCanvas.width = displayViewport.width * ocrScale;
-             rotCanvas.height = displayViewport.height * ocrScale;
-             const rotCtx = rotCanvas.getContext('2d');
-             
-             rotCtx.translate(rotCanvas.width/2, rotCanvas.height/2);
-             rotCtx.rotate(pageRotation * Math.PI / 180);
-             rotCtx.drawImage(canvas, -canvas.width/2, -canvas.height/2);
-             
-             outPdf.addImage(rotCanvas.toDataURL('image/jpeg', 0.85), 'JPEG', 0, 0, displayViewport.width, displayViewport.height);
-        }
+        outPdf.addImage(imgData, 'JPEG', 0, 0, viewport.width, viewport.height);
+
+        // Run OCR. Tesseract will automatically detect if the text inside the image is sideways.
+        const { data } = await worker.recognize(canvas);
         
         let words = [];
         if (data.words) {
@@ -173,30 +148,11 @@ async function processPDF(file, fileIndex, totalFiles) {
                 hasPageText = true;
                 totalText += text + " ";
 
-                let x = word.bbox.x0 / ocrScale;
-                let y = word.bbox.y0 / ocrScale;
-                let w = (word.bbox.x1 - word.bbox.x0) / ocrScale;
-                let h = (word.bbox.y1 - word.bbox.y0) / ocrScale;
-
-                // Transform coordinates if the page was originally rotated
-                if (pageRotation === 90) {
-                    const tempX = x;
-                    x = displayViewport.width - (y + h);
-                    y = tempX;
-                    const tempW = w;
-                    w = h;
-                    h = tempW;
-                } else if (pageRotation === 180) {
-                    x = displayViewport.width - (x + w);
-                    y = displayViewport.height - (y + h);
-                } else if (pageRotation === 270) {
-                    const tempX = x;
-                    x = y;
-                    y = displayViewport.height - (tempX + w);
-                    const tempW = w;
-                    w = h;
-                    h = tempW;
-                }
+                // Base coordinates in PDF points
+                const x = word.bbox.x0 / ocrScale;
+                const y = word.bbox.y0 / ocrScale;
+                const w = (word.bbox.x1 - word.bbox.x0) / ocrScale;
+                const h = (word.bbox.y1 - word.bbox.y0) / ocrScale;
 
                 // Set font size to match box height, capped for safety
                 const fontSize = Math.max(1, Math.min(h, 72));
@@ -225,10 +181,33 @@ async function processPDF(file, fileIndex, totalFiles) {
                         if (remainingW > 0) charSpace = remainingW / (text.length - 1);
                     }
 
+                    // Determine if Tesseract found this word to be rotated
+                    let angle = 0;
+                    // If the word's bounding box is significantly taller than it is wide, 
+                    // and it has multiple characters, it's likely vertical text (rotated 90 or -90).
+                    // In Tesseract, the bbox naturally wraps the upright text.
+                    if (word.baseline && word.baseline.angle !== undefined) {
+                        angle = word.baseline.angle;
+                    } else if (h > (w * 1.5) && text.length > 2) {
+                        // Heuristic for vertical text if no baseline angle is provided
+                        angle = 90; 
+                    }
+
+                    // Tesseract angle might need adjustment for jsPDF
+                    // jsPDF expects counter-clockwise angles in degrees
+                    
+                    if (angle !== 0) {
+                         // Swap width and height for font sizing if it's strictly vertical
+                         if (Math.abs(angle) === 90) {
+                             outPdf.setFontSize(Math.max(1, Math.min(w, 72)));
+                         }
+                    }
+
                     outPdf.text(text, x, y + (h * 0.85), {
                         renderingMode: "invisible",
                         horizontalScale: scaleX,
-                        charSpace: Math.min(charSpace, 5)
+                        charSpace: Math.min(charSpace, 5),
+                        angle: angle // Apply rotation to the text
                     });
                 }
             });
@@ -242,4 +221,5 @@ async function processPDF(file, fileIndex, totalFiles) {
     statusText.innerText = "Saving " + file.name.replace('.pdf', '_Searchable.pdf') + "...";
     outPdf.save(file.name.replace('.pdf', '_Searchable.pdf'));
 }
+
 
