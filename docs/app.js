@@ -151,12 +151,28 @@ async function processPDF(file, fileIndex, totalFiles) {
                 hasPageText = true;
                 totalText += text + " ";
 
+                // We MUST use the exact raw bounding box coordinates.
+                // If the bounding box is vertical (h > w), we do NOT swap coordinates.
+                // We draw it exactly where Tesseract says it is on the canvas.
                 const x = word.bbox.x0 / ocrScale;
                 const y = word.bbox.y0 / ocrScale;
                 const w = (word.bbox.x1 - word.bbox.x0) / ocrScale;
                 const h = (word.bbox.y1 - word.bbox.y0) / ocrScale;
 
-                const fontSize = Math.max(1, Math.min(h, 72));
+                // Font size should generally match the height of the bounding box
+                let fontSize = h;
+                
+                // If it's a vertical word (rotated 90 deg), the font size is the width
+                let angle = 0;
+                if (h > w * 1.5 && text.length > 1) {
+                    angle = 90;
+                    fontSize = w;
+                } else if (word.baseline && word.baseline.angle !== undefined && Math.abs(word.baseline.angle) > 45) {
+                    angle = word.baseline.angle;
+                    fontSize = w;
+                }
+
+                fontSize = Math.max(1, Math.min(fontSize, 72));
                 outPdf.setFontSize(fontSize);
 
                 if (isDebug) {
@@ -215,6 +231,7 @@ async function processPDF(file, fileIndex, totalFiles) {
     statusText.innerText = "Saving " + file.name.replace('.pdf', '_Searchable.pdf') + "...";
     outPdf.save(file.name.replace('.pdf', '_Searchable.pdf'));
 }
+
 
 
 
