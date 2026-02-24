@@ -48,26 +48,10 @@
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>        
     <script src="app.js?v=20260224144850"></script>
-        <script>
-        // Critical shim for jsPDF horizontal scaling (Tz operator)
-        // PDF Specification for Tz expects a PERCENTAGE (100 = normal)
-        if (window.jspdf && window.jspdf.jsPDF) {
-            (function(API) {
-                const oldText = API.text;
-                API.text = function(text, x, y, options) {
-                    if (options && options.horizontalScale && options.horizontalScale !== 100) {
-                        this.internal.write((options.horizontalScale).toFixed(2) + " Tz");
-                        const res = oldText.apply(this, arguments);
-                        this.internal.write("100 Tz"); // Reset to 100%
-                        return res;
-                    }
-                    return oldText.apply(this, arguments);
-                };
-            })(window.jspdf.jsPDF.API);
-        }
-    </script>
+        
 </body>
 </html>
+
 
 
 
