@@ -52,17 +52,25 @@ document.addEventListener('DOMContentLoaded', () => {
         dropZone.style.pointerEvents = 'none';
         progressContainer.style.display = 'block';
 
-        for (let i = 0; i < selectedFiles.length; i++) {
-            await processPDF(selectedFiles[i], i, selectedFiles.length);
-        }
+        console.log("Starting processing...", selectedFiles.length, "files");
 
-        statusText.innerText = "All PDFs processed successfully!";
-        progressBar.style.width = '100%';
-        startBtn.disabled = false;
-        dropZone.style.pointerEvents = 'auto';
-        selectedFiles = [];
-        fileList.innerHTML = '';
-        fileInput.value = '';
+        try {
+            for (let i = 0; i < selectedFiles.length; i++) {
+                console.log("Processing file", i+1, selectedFiles[i].name);
+                await processPDF(selectedFiles[i], i, selectedFiles.length);
+            }
+            statusText.innerText = "All PDFs processed successfully!";
+            progressBar.style.width = '100%';
+        } catch (e) {
+            console.error("Critical error in processing:", e);
+            statusText.innerText = "Error: " + e.message;
+        } finally {
+            startBtn.disabled = false;
+            dropZone.style.pointerEvents = 'auto';
+            selectedFiles = [];
+            fileList.innerHTML = '';
+            fileInput.value = '';
+        }
     });
 });
 
@@ -107,9 +115,12 @@ async function processPDF(file, fileIndex, totalFiles) {
         const imgData = canvas.toDataURL('image/jpeg', 0.85);
         outPdf.addImage(imgData, 'JPEG', 0, 0, viewport.width, viewport.height);
 
-        const { data } = await worker.recognize(canvas);
-        
-        let words = [];
+        console.log(Starting OCR for page ...);
+        try {
+            const { data } = await worker.recognize(canvas);
+            console.log(OCR complete for page .);
+            
+            let words = [];
         if (data.words) {
             words = data.words;
         } else if (data.blocks) {
@@ -190,12 +201,18 @@ async function processPDF(file, fileIndex, totalFiles) {
                 }
             });
         }
-        if (!hasPageText) totalText += "[No text found]";
-        previewText.innerText = "Preview: \n" + totalText.substring(Math.max(0, totalText.length - 200));
+            if (!hasPageText) totalText += "[No text found]";
+            previewText.innerText = "Preview: \n" + totalText.substring(Math.max(0, totalText.length - 200));
+        } catch(err) {
+            console.error(OCR failed on page :, err);
+            throw err;
+        }
     }
 
+    console.log("Terminating worker...");
     await worker.terminate();
 
     statusText.innerText = "Saving " + file.name.replace('.pdf', '_Searchable.pdf') + "...";
     outPdf.save(file.name.replace('.pdf', '_Searchable.pdf'));
 }
+
