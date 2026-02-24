@@ -27,22 +27,26 @@
         <div id="fileList" class="mt-3"></div>
 
         <div class="mt-4 text-center">
+            <div class="form-check form-switch mb-3 d-flex justify-content-center">
+                <input class="form-check-input me-2" type="checkbox" id="debugMode">
+                <label class="form-check-label" for="debugMode">Debug Mode (Visible Red Text)</label>
+            </div>
             <button id="startBtn" class="btn btn-primary btn-lg" disabled>Make PDF(s) Searchable</button>
         </div>
 
         <div id="progressContainer" class="mt-4">
-            <h5 id="statusText" class="text-center">Processing...</h5>
-            <div class="progress">
+            <h5 id="statusText" class="text-center">Ready</h5>
+            <div class="progress mb-2">
                 <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%"></div>
             </div>
-            <p id="previewText" class="mt-2 text-muted text-center" style="white-space: pre-wrap; font-family: monospace;"></p>
+            <p id="previewText" class="mt-2 text-muted text-center" style="white-space: pre-wrap; font-family: monospace; font-size: 12px;"></p>
         </div>
     </div>
 
     <!-- Libraries -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/pdf-lib/dist/pdf-lib.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>        
     <script src="app.js"></script>
 </body>
 </html>

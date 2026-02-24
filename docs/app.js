@@ -1,5 +1,5 @@
-let PDFDocument;
-let dropZone, fileInput, fileList, startBtn, progressContainer, progressBar, statusText, previewText;
+let jsPDF;
+let dropZone, fileInput, fileList, startBtn, progressContainer, progressBar, statusText, previewText, debugMode;
 let selectedFiles = [];
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -7,8 +7,8 @@ document.addEventListener('DOMContentLoaded', () => {
         window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
     }
 
-    if (window.PDFLib) {
-        PDFDocument = window.PDFLib.PDFDocument;
+    if (window.jspdf && window.jspdf.jsPDF) {
+        jsPDF = window.jspdf.jsPDF;
     }
 
     dropZone = document.getElementById('dropZone');
@@ -19,6 +19,7 @@ document.addEventListener('DOMContentLoaded', () => {
     progressBar = document.getElementById('progressBar');
     statusText = document.getElementById('statusText');
     previewText = document.getElementById('previewText');
+    debugMode = document.getElementById('debugMode');
 
     dropZone.addEventListener('click', () => fileInput.click());
     dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.style.background = '#e9ecef'; });
@@ -55,7 +56,7 @@ document.addEventListener('DOMContentLoaded', () => {
             await processPDF(selectedFiles[i], i, selectedFiles.length);
         }
 
-        statusText.innerText = "Processing Complete!";
+        statusText.innerText = "All PDFs processed successfully!";
         progressBar.style.width = '100%';
         startBtn.disabled = false;
         dropZone.style.pointerEvents = 'auto';
@@ -69,58 +70,124 @@ async function processPDF(file, fileIndex, totalFiles) {
     statusText.innerText = "Loading " + file.name + "...";
     const arrayBuffer = await file.arrayBuffer();
     const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-    
-    // Use the latest Tesseract worker
-    const worker = await Tesseract.createWorker('eng', 1);
-    
-    // Create the master PDF using pdf-lib
-    const masterPdf = await PDFDocument.create();
+
+    const worker = await Tesseract.createWorker('eng');
+
+    let outPdf = null;
     let totalText = "";
+    const isDebug = debugMode && debugMode.checked;
 
     for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-        statusText.innerText = "File " + (fileIndex+1) + "/" + totalFiles + " | OCR Page " + pageNum + "/" + pdf.numPages + "...";
+        statusText.innerText = "File " + (fileIndex + 1) + "/" + totalFiles + " | OCR Page " + pageNum + "/" + pdf.numPages + "...";
         progressBar.style.width = (((fileIndex * pdf.numPages) + pageNum - 1) / (totalFiles * pdf.numPages) * 100) + "%";
 
         const page = await pdf.getPage(pageNum);
-        
-        // CRITICAL: Render at 1.0 scale (72 DPI) to match PDF point coordinates exactly
-        // This eliminates the "random highlighting" caused by coordinate mismatch.
         const viewport = page.getViewport({ scale: 1.0 });
+
+        if (!outPdf) {
+            outPdf = new jsPDF({
+                orientation: viewport.width > viewport.height ? 'l' : 'p',
+                unit: 'pt',
+                format: [viewport.width, viewport.height]
+            });
+        } else {
+            outPdf.addPage([viewport.width, viewport.height], viewport.width > viewport.height ? 'l' : 'p');
+            outPdf.setPage(pageNum);
+        }
+
+        const ocrScale = 2.0;
+        const ocrViewport = page.getViewport({ scale: ocrScale });
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
-        canvas.width = viewport.width;
-        canvas.height = viewport.height;
+        canvas.width = ocrViewport.width;
+        canvas.height = ocrViewport.height;
 
-        await page.render({ canvasContext: ctx, viewport: viewport }).promise;
-        const imgData = canvas.toDataURL('image/jpeg', 0.95);
+        await page.render({ canvasContext: ctx, viewport: ocrViewport }).promise;
+        const imgData = canvas.toDataURL('image/jpeg', 0.85);
+        outPdf.addImage(imgData, 'JPEG', 0, 0, viewport.width, viewport.height);
 
-        // Generate searchable PDF natively in Tesseract
-        // This is the most accurate way to handle the text layer.
-        const { data } = await worker.recognize(imgData, {}, { pdf: true });
+        // Run OCR and request all hierarchies
+        const { data } = await worker.recognize(canvas);
         
-        totalText += "\n--- Page " + pageNum + " ---\n" + (data.text || "");
-        previewText.innerText = "Preview: \n" + totalText.substring(Math.max(0, totalText.length - 200));
-
-        if (data.pdf) {
-            const pageDoc = await PDFDocument.load(new Uint8Array(data.pdf));
-            const [copiedPage] = await masterPdf.copyPages(pageDoc, [0]);
-            
-            // Ensure the page size is exactly the same as the original PDF points
-            copiedPage.setSize(viewport.width, viewport.height);
-            masterPdf.addPage(copiedPage);
+        let words = [];
+        if (data.words) {
+            words = data.words;
+        } else if (data.blocks) {
+            data.blocks.forEach(b => {
+                if (b.paragraphs) b.paragraphs.forEach(p => {
+                    if (p.lines) p.lines.forEach(l => {
+                        if (l.words) words.push(...l.words);
+                    });
+                });
+            });
         }
+
+        totalText += "\n--- Page " + pageNum + " ---\n";
+        let hasPageText = false;
+
+        if (words.length > 0) {
+            // Sort words by Y primarily, then X. This ensures the text stream in the PDF is logical.
+            words.sort((a, b) => {
+                const yDiff = a.bbox.y0 - b.bbox.y0;
+                if (Math.abs(yDiff) < 15) return a.bbox.x0 - b.bbox.x0;
+                return yDiff;
+            });
+
+            words.forEach(word => {
+                let text = word.text.trim();
+                // Strip non-printable characters to prevent width calculation errors
+                text = text.replace(/[^\x20-\x7E]/g, '');
+                if (!text) return;
+                
+                hasPageText = true;
+                totalText += text + " ";
+
+                const x = word.bbox.x0 / ocrScale;
+                const y = word.bbox.y0 / ocrScale;
+                const w = (word.bbox.x1 - word.bbox.x0) / ocrScale;
+                const h = (word.bbox.y1 - word.bbox.y0) / ocrScale;
+
+                // Set font size to match box height, capped for safety
+                const fontSize = Math.max(1, Math.min(h, 72));
+                outPdf.setFontSize(fontSize);
+                outPdf.setFont("Helvetica");
+
+                if (isDebug) {
+                    outPdf.setDrawColor(255, 0, 0);
+                    outPdf.rect(x, y, w, h);
+                    outPdf.setTextColor(255, 0, 0);
+                    outPdf.text(text, x, y + (h * 0.8), { renderingMode: "visible" });
+                } else {
+                    const textWidth = outPdf.getTextWidth(text);
+                    let scaleX = 100;
+                    if (textWidth > 1 && w > 1) {
+                        scaleX = (w / textWidth) * 100;
+                    }
+                    // STRICT CAP: Scale between 50% and 150%. 
+                    // Values outside this cause the "whole page highlight" bug.
+                    scaleX = Math.max(50, Math.min(scaleX, 150));
+
+                    // Use charSpace as a fallback or if scaleX is near 100
+                    let charSpace = 0;
+                    if (scaleX === 150 && text.length > 1) {
+                        const remainingW = w - (textWidth * 1.5);
+                        if (remainingW > 0) charSpace = remainingW / (text.length - 1);
+                    }
+
+                    outPdf.text(text, x, y + (h * 0.85), {
+                        renderingMode: "invisible",
+                        horizontalScale: scaleX,
+                        charSpace: Math.min(charSpace, 5)
+                    });
+                }
+            });
+        }
+        if (!hasPageText) totalText += "[No text found]";
+        previewText.innerText = "Preview: \n" + totalText.substring(Math.max(0, totalText.length - 200));
     }
 
     await worker.terminate();
 
-    const pdfBytes = await masterPdf.save();
-    const blob = new Blob([pdfBytes], { type: 'application/pdf' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = file.name.replace('.pdf', '_Searchable.pdf');
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    statusText.innerText = "Saving " + file.name.replace('.pdf', '_Searchable.pdf') + "...";
+    outPdf.save(file.name.replace('.pdf', '_Searchable.pdf'));
 }
