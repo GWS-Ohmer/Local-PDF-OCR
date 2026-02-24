@@ -82,7 +82,7 @@ async function processPDF(file, fileIndex, totalFiles) {
         progressBar.style.width = (((fileIndex * pdf.numPages) + pageNum - 1) / (totalFiles * pdf.numPages) * 100) + "%";
 
         const page = await pdf.getPage(pageNum);
-        const viewport = page.getViewport({ scale: 1.0 });
+        // viewport declared earlier
 
         if (!outPdf) {
             outPdf = new jsPDF({
@@ -98,7 +98,7 @@ async function processPDF(file, fileIndex, totalFiles) {
         const ocrScale = 2.0;
         // Let PDF.js handle the viewport naturally, including any built-in rotation.
         // This means the image we see on canvas is exactly what the user sees.
-        const viewport = page.getViewport({ scale: 1.0 });
+        // viewport declared earlier
         const ocrViewport = page.getViewport({ scale: ocrScale });
         
         const canvas = document.createElement('canvas');
@@ -221,5 +221,6 @@ async function processPDF(file, fileIndex, totalFiles) {
     statusText.innerText = "Saving " + file.name.replace('.pdf', '_Searchable.pdf') + "...";
     outPdf.save(file.name.replace('.pdf', '_Searchable.pdf'));
 }
+
 
 
