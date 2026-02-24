@@ -92,7 +92,12 @@ async function processPDF(file, fileIndex, totalFiles) {
     const arrayBuffer = await file.arrayBuffer();
     const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
     
-    const worker = await Tesseract.createWorker('eng');
+    const worker = await Tesseract.createWorker('eng', 1, {
+        logger: m => console.log(m)
+    });
+    await worker.setParameters({
+        tessedit_pageseg_mode: '1', // Auto segmentation with OSD
+    });
     
     let outPdf = null;
     let totalText = "";
@@ -135,81 +140,62 @@ async function processPDF(file, fileIndex, totalFiles) {
         totalText += "\n--- Page " + pageNum + " ---\n";
         let hasText = false;
 
-                // Use Tesseract's natural word blocks for accurate copy-paste
-        if (data.blocks && data.blocks.length > 0) {
-            data.blocks.forEach(block => {
-                if (block.paragraphs) {
-                    block.paragraphs.forEach(paragraph => {
-                        if (paragraph.lines) {
-                            paragraph.lines.forEach(line => {
-                                if (line.words) {
-                                    line.words.forEach(word => {
-                                        const text = word.text.trim();
-                                        if (!text) return;
-                                        hasText = true;
-                                        totalText += text + " ";
-
-                                        const x = word.bbox.x0 / ocrScale;
-                                        const y = word.bbox.y0 / ocrScale;
-                                        const w = (word.bbox.x1 - word.bbox.x0) / ocrScale;
-                                        const h = (word.bbox.y1 - word.bbox.y0) / ocrScale;
-
-                                        const fontSize = h > 0 ? h : 10;
-                                        // The baseline in Tesseract is often slightly above the bottom of the bounding box
-                                        // For PDF invisible text, placing it precisely at the bottom left helps selection flow
-                                        const baselineY = word.bbox.y1 / ocrScale;
-
-                                        outPdf.setFontSize(fontSize);
-                                        outPdf.setTextColor(0, 0, 0);
-
-                                        const textWidth = outPdf.getStringUnitWidth(text) * fontSize / outPdf.internal.scaleFactor;
-
-                                        let scaleX = 100;
-                                        if (textWidth > 0 && w > 0) {
-                                            scaleX = (w / textWidth) * 100;
-                                        }
-
-                                        outPdf.text(text, x, baselineY, {
-                                            renderingMode: "invisible",
-                                            horizontalScale: scaleX
-                                        });
-                                    });
-                                }
-                            });
-                        }
+                // Tesseract v5 often nests words inside blocks/paragraphs/lines
+        // We flatten them to ensure we don't miss anything and process in reading order
+        let allWords = [];
+        if (data.blocks) {
+            data.blocks.forEach(b => {
+                if (b.paragraphs) b.paragraphs.forEach(p => {
+                    if (p.lines) p.lines.forEach(l => {
+                        if (l.words) allWords.push(...l.words);
                     });
-                }
+                });
             });
-        } else if (data.lines && data.lines.length > 0) { // Fallback to lines if words are missing
-             data.lines.forEach(line => {
-                const text = line.text.replace(/\n/g, '').trim();
-                if (!text) return;
+        }
+        // Fallback to data.words if blocks hierarchy is missing
+        if (allWords.length === 0 && data.words) allWords = data.words;
+
+        if (allWords.length > 0) {
+            allWords.forEach(word => {
+                const text = word.text.trim();
+                if (!text || text.length === 0) return;
                 hasText = true;
-                totalText += text + "\n";
+                totalText += text + " ";
 
-                const x = line.bbox.x0 / ocrScale;
-                const y = line.bbox.y0 / ocrScale;
-                const w = (line.bbox.x1 - line.bbox.x0) / ocrScale;
-                const h = (line.bbox.y1 - line.bbox.y0) / ocrScale;
+                // Map canvas pixels back to PDF points
+                const x = word.bbox.x0 / ocrScale;
+                const y = word.bbox.y0 / ocrScale;
+                const w = (word.bbox.x1 - word.bbox.x0) / ocrScale;
+                const h = (word.bbox.y1 - word.bbox.y0) / ocrScale;
 
-                const fontSize = h > 0 ? h : 10;
-                const baselineY = line.bbox.y1 / ocrScale; // Use bottom of bounding box as baseline to match Python behavior
-
+                // CRITICAL: Prevent the "whole page highlight" bug by capping font size
+                // and ensuring we don't have impossible dimensions
+                const fontSize = Math.max(1, Math.min(h, 100));
                 outPdf.setFontSize(fontSize);
-                outPdf.setTextColor(0, 0, 0);
 
-                const textWidth = outPdf.getStringUnitWidth(text) * fontSize / outPdf.internal.scaleFactor;
-
+                const textWidth = outPdf.getTextWidth(text);
+                
+                // We use a safe horizontal scale instead of charSpace for better word-level alignment
+                // horizontalScale (Tz) is a percentage. 100 = normal.
                 let scaleX = 100;
                 if (textWidth > 0 && w > 0) {
                     scaleX = (w / textWidth) * 100;
                 }
+                
+                // SAFETY: Strictly cap scaleX between 50% and 300%
+                // Values like 1000% or 0% are what cause "random highlighting" or "whole page" bugs
+                scaleX = Math.max(50, Math.min(scaleX, 300));
 
-                outPdf.text(text, x, baselineY, {
+                // Place text at the bottom-left of the word box (baseline)
+                // We use the raw Tz command via a custom jsPDF hook if possible, 
+                // but since we are using word-level, simple placement is usually enough.
+                outPdf.text(text, x, y + (h * 0.9), {
                     renderingMode: "invisible",
                     horizontalScale: scaleX
                 });
             });
+        } else if (data.text) {
+             totalText += data.text;
         }
         if(!hasText) totalText += "[No text found]";
         
@@ -221,6 +207,8 @@ async function processPDF(file, fileIndex, totalFiles) {
     statusText.innerText = `Saving ${file.name.replace('.pdf', '_Searchable.pdf')}...`;
     outPdf.save(file.name.replace('.pdf', '_Searchable.pdf'));
 }
+
+
 
 
 
