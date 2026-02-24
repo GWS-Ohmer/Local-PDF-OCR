@@ -115,10 +115,10 @@ async function processPDF(file, fileIndex, totalFiles) {
         const imgData = canvas.toDataURL('image/jpeg', 0.85);
         outPdf.addImage(imgData, 'JPEG', 0, 0, viewport.width, viewport.height);
 
-        console.log(Starting OCR for page ...);
+        console.log(`Starting OCR for page ${pageNum}...`);
         try {
             const { data } = await worker.recognize(canvas);
-            console.log(OCR complete for page .);
+            console.log(`OCR complete for page ${pageNum}.`);
             
             let words = [];
         if (data.words) {
@@ -204,7 +204,7 @@ async function processPDF(file, fileIndex, totalFiles) {
             if (!hasPageText) totalText += "[No text found]";
             previewText.innerText = "Preview: \n" + totalText.substring(Math.max(0, totalText.length - 200));
         } catch(err) {
-            console.error(OCR failed on page :, err);
+            console.error(`OCR failed on page ${pageNum}:`, err);
             throw err;
         }
     }
@@ -215,6 +215,9 @@ async function processPDF(file, fileIndex, totalFiles) {
     statusText.innerText = "Saving " + file.name.replace('.pdf', '_Searchable.pdf') + "...";
     outPdf.save(file.name.replace('.pdf', '_Searchable.pdf'));
 }
+
+
+
 
 
 
