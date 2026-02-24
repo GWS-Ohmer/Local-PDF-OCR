@@ -111,9 +111,13 @@ async function processPDF(file, fileIndex, totalFiles) {
             const pageDoc = await PDFDocument.load(new Uint8Array(data.pdf));
             const [copiedPage] = await masterPdf.copyPages(pageDoc, [0]);
             
-            // Critical Step: Force the stitched page to match the original PDF's dimensions
-            // Tesseract sometimes outputs dimensions based on pixels instead of points.
+            // The original PDF dimensions in points (1 point = 1/72 inch)
             const originalViewport = page.getViewport({ scale: 1.0 });
+            
+            // Tesseract generated the PDF based on our 1.5x scaled image pixels.
+            // We need to scale the content back down so it fits in the original point size.
+            // If we just use setSize(), it crops the page. We must scale the actual content.
+            copiedPage.scale(1 / 1.5, 1 / 1.5);
             copiedPage.setSize(originalViewport.width, originalViewport.height);
             
             masterPdf.addPage(copiedPage);
@@ -134,3 +138,4 @@ async function processPDF(file, fileIndex, totalFiles) {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
 }
+
