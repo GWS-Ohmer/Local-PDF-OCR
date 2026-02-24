@@ -1,19 +1,18 @@
-let jsPDF;
+let PDFDocument;
 let dropZone, fileInput, fileList, startBtn, progressContainer, progressBar, statusText, previewText;
 let selectedFiles = [];
 
 document.addEventListener('DOMContentLoaded', () => {
-    // Wait until libraries are definitely loaded
     if (window.pdfjsLib) {
         window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
     } else {
         console.error("PDF.js library failed to load.");
     }
 
-    if (window.jspdf && window.jspdf.jsPDF) {
-        jsPDF = window.jspdf.jsPDF;
+    if (window.PDFLib && window.PDFLib.PDFDocument) {
+        PDFDocument = window.PDFLib.PDFDocument;
     } else {
-        console.error("jsPDF library failed to load.");
+        console.error("pdf-lib library failed to load.");
     }
 
     dropZone = document.getElementById('dropZone');
@@ -25,20 +24,19 @@ document.addEventListener('DOMContentLoaded', () => {
     statusText = document.getElementById('statusText');
     previewText = document.getElementById('previewText');
 
-    // Drag and Drop Handlers
     dropZone.addEventListener('click', () => {
         fileInput.click();
     });
-    
-    dropZone.addEventListener('dragover', (e) => { 
-        e.preventDefault(); 
-        dropZone.style.background = '#e9ecef'; 
+
+    dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropZone.style.background = '#e9ecef';
     });
-    
+
     dropZone.addEventListener('dragleave', () => {
         dropZone.style.background = '#fff';
     });
-    
+
     dropZone.addEventListener('drop', (e) => {
         e.preventDefault();
         dropZone.style.background = '#fff';
@@ -58,7 +56,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (files[i].type === 'application/pdf') {
                 selectedFiles.push(files[i]);
                 const p = document.createElement('p');
-                p.textContent = `📄 ${files[i].name}`;
+                p.textContent = ??  + files[i].name;
                 p.className = 'mb-1 font-monospace';
                 fileList.appendChild(p);
             }
@@ -82,46 +80,29 @@ document.addEventListener('DOMContentLoaded', () => {
         dropZone.style.pointerEvents = 'auto';
         selectedFiles = [];
         fileList.innerHTML = '';
-        fileInput.value = ''; // Reset input
+        fileInput.value = ''; 
     });
 });
 
 async function processPDF(file, fileIndex, totalFiles) {
-    statusText.innerText = `Loading ${file.name}...`;
-    
+    statusText.innerText = Loading  + file.name + ...;
+
     const arrayBuffer = await file.arrayBuffer();
     const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-    
-    const worker = await Tesseract.createWorker('eng', 1, {
-        logger: m => console.log(m)
-    });
-    await worker.setParameters({
-        tessedit_pageseg_mode: '1', // Auto segmentation with OSD
-    });
-    
-    let outPdf = null;
+
+    const worker = await Tesseract.createWorker('eng');
+
+    const masterPdf = await PDFDocument.create();
     let totalText = "";
 
     for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-        statusText.innerText = `File ${fileIndex + 1}/${totalFiles} | OCR Page ${pageNum}/${pdf.numPages}...`;
+        statusText.innerText = File  + (fileIndex + 1) + / + totalFiles +  | OCR Page  + pageNum + / + pdf.numPages + ...;
         const progress = (((fileIndex * pdf.numPages) + pageNum - 1) / (totalFiles * pdf.numPages)) * 100;
-        progressBar.style.width = `${progress}%`;
+        progressBar.style.width = progress + '%';
 
         const page = await pdf.getPage(pageNum);
-        const viewport = page.getViewport({ scale: 1.0 });
-
-        if (!outPdf) {
-            outPdf = new jsPDF({
-                orientation: viewport.width > viewport.height ? 'landscape' : 'portrait',
-                unit: 'pt',
-                format: [viewport.width, viewport.height]
-            });
-        } else {
-            outPdf.addPage([viewport.width, viewport.height], viewport.width > viewport.height ? 'landscape' : 'portrait');
-            outPdf.setPage(pageNum);
-        }
-
-        // Render page to canvas at 2x scale for better OCR
+        
+        // Render page to canvas at 2x scale for better OCR accuracy
         const ocrScale = 2.0;
         const ocrViewport = page.getViewport({ scale: ocrScale });
         const canvas = document.createElement('canvas');
@@ -131,87 +112,43 @@ async function processPDF(file, fileIndex, totalFiles) {
 
         await page.render({ canvasContext: ctx, viewport: ocrViewport }).promise;
 
+        // Convert canvas to a Base64 image
         const imgData = canvas.toDataURL('image/jpeg', 0.8);
-        outPdf.addImage(imgData, 'JPEG', 0, 0, viewport.width, viewport.height);
 
-        // Run OCR
-        const { data } = await worker.recognize(canvas);
+        // Tell Tesseract to generate a searchable PDF for this image natively
+        const { data } = await worker.recognize(imgData, { pdfTitle: 'Page ' + pageNum }, { pdf: true });
         
         totalText += "\n--- Page " + pageNum + " ---\n";
-        let hasText = false;
-
-                // Flatten and sort words to ensure logical selection flow
-        let allWords = [];
-        if (data.blocks) {
-            data.blocks.forEach(b => {
-                if (b.paragraphs) b.paragraphs.forEach(p => {
-                    if (p.lines) p.lines.forEach(l => {
-                        if (l.words) allWords.push(...l.words);
-                    });
-                });
-            });
+        if (data.text && data.text.trim()) {
+            totalText += data.text.trim();
+        } else {
+            totalText += "[No text found]";
         }
-        if (allWords.length === 0 && data.words) allWords = data.words;
-
-        if (allWords.length > 0) {
-            // Sort words: Primary sort by Y (line-by-line), Secondary sort by X (left-to-right)
-            // This is the "Secret Sauce" to smooth PDF text selection
-            allWords.sort((a, b) => {
-                const yDiff = a.bbox.y0 - b.bbox.y0;
-                if (Math.abs(yDiff) < 15) return a.bbox.x0 - b.bbox.x0;
-                return yDiff;
-            });
-
-            allWords.forEach(word => {
-                const text = word.text.trim();
-                if (!text) return;
-                hasText = true;
-                totalText += text + " ";
-
-                // Coordinates in PDF points
-                const x = word.bbox.x0 / ocrScale;
-                const y = word.bbox.y0 / ocrScale;
-                const w = (word.bbox.x1 - word.bbox.x0) / ocrScale;
-                const h = (word.bbox.y1 - word.bbox.y0) / ocrScale;
-
-                // Font size should match word height
-                const fontSize = Math.max(1, Math.min(h, 80));
-                outPdf.setFontSize(fontSize);
-
-                const textWidth = outPdf.getTextWidth(text);
-                
-                // Use a safe horizontal scale to stretch the invisible text to the word box
-                let scaleX = 100;
-                if (textWidth > 1 && w > 1) {
-                    scaleX = (w / textWidth) * 100;
-                }
-                
-                // STATED FIX: Tight cap on scaling (60% to 180%) 
-                // Any wider/narrower and PDF viewers start "randomly" highlighting surrounding areas
-                scaleX = Math.max(60, Math.min(scaleX, 180));
-
-                // Place text precisely at the word's baseline
-                outPdf.text(text, x, y + (h * 0.85), {
-                    renderingMode: "invisible",
-                    horizontalScale: scaleX
-                });
-            });
-        } else if (data.text) {
-             totalText += data.text;
-        }
-        if(!hasText) totalText += "[No text found]";
-        
         previewText.innerText = "Extracted Text Preview: \n" + totalText.substring(Math.max(0, totalText.length - 150)) + "...";
+
+        // Parse the PDF byte array returned by Tesseract
+        if (data.pdf) {
+            const pageDoc = await PDFDocument.load(new Uint8Array(data.pdf));
+            const [copiedPage] = await masterPdf.copyPages(pageDoc, [0]);
+            masterPdf.addPage(copiedPage);
+        }
     }
 
     await worker.terminate();
 
-    statusText.innerText = `Saving ${file.name.replace('.pdf', '_Searchable.pdf')}...`;
-    outPdf.save(file.name.replace('.pdf', '_Searchable.pdf'));
+    statusText.innerText = Saving  + file.name.replace('.pdf', '_Searchable.pdf') + ...;
+    
+    // Serialize the PDFDocument to bytes (a Uint8Array)
+    const pdfBytes = await masterPdf.save();
+    
+    // Trigger download
+    const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = file.name.replace('.pdf', '_Searchable.pdf');
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
 }
-
-
-
-
-
-
