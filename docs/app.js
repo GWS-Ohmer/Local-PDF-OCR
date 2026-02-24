@@ -96,18 +96,49 @@ async function processPDF(file, fileIndex, totalFiles) {
         }
 
         const ocrScale = 2.0;
-        const ocrViewport = page.getViewport({ scale: ocrScale });
+        // CRITICAL FIX: Base viewport scale on un-rotated dimensions to prevent skewing
+        // PDF.js can auto-rotate viewports, which misaligns OCR coordinates. 
+        // We force it to 0 rotation to get the raw page image.
+        const baseViewport = page.getViewport({ scale: ocrScale, rotation: 0 });
+        
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
-        canvas.width = ocrViewport.width;
-        canvas.height = ocrViewport.height;
+        canvas.width = baseViewport.width;
+        canvas.height = baseViewport.height;
 
-        await page.render({ canvasContext: ctx, viewport: ocrViewport }).promise;
-        const imgData = canvas.toDataURL('image/jpeg', 0.85);
-        outPdf.addImage(imgData, 'JPEG', 0, 0, viewport.width, viewport.height);
-
-        // Run OCR and request all hierarchies
+        // Render the raw, un-rotated page
+        await page.render({ canvasContext: ctx, viewport: baseViewport }).promise;
+        
+        // We still need to add the image to the PDF in its proper intended orientation
+        const displayViewport = page.getViewport({ scale: 1.0 });
+        
+        // Run OCR on the RAW canvas. Tesseract will handle script detection natively.
         const { data } = await worker.recognize(canvas);
+
+        // If the original PDF page was rotated (e.g. 90, 180, 270), we must rotate our OCR coordinates 
+        // to match the final display viewport.
+        const pageRotation = page.rotate || 0;
+        
+        // Add the base image to the PDF, handling PDF.js's built-in rotation display
+        const imgData = canvas.toDataURL('image/jpeg', 0.85);
+        if (pageRotation === 0) {
+            outPdf.addImage(imgData, 'JPEG', 0, 0, displayViewport.width, displayViewport.height);
+        } else {
+             // For rotated pages, the simplest approach in jsPDF is to add the raw image 
+             // and let the bounding box math handle the transformation.
+             // However, to keep it simple, we use the displayViewport dims and apply matrix transforms later.
+             // Since jsPDF addImage rotation is tricky, we'll draw the canvas upright.
+             const rotCanvas = document.createElement('canvas');
+             rotCanvas.width = displayViewport.width * ocrScale;
+             rotCanvas.height = displayViewport.height * ocrScale;
+             const rotCtx = rotCanvas.getContext('2d');
+             
+             rotCtx.translate(rotCanvas.width/2, rotCanvas.height/2);
+             rotCtx.rotate(pageRotation * Math.PI / 180);
+             rotCtx.drawImage(canvas, -canvas.width/2, -canvas.height/2);
+             
+             outPdf.addImage(rotCanvas.toDataURL('image/jpeg', 0.85), 'JPEG', 0, 0, displayViewport.width, displayViewport.height);
+        }
         
         let words = [];
         if (data.words) {
@@ -142,10 +173,30 @@ async function processPDF(file, fileIndex, totalFiles) {
                 hasPageText = true;
                 totalText += text + " ";
 
-                const x = word.bbox.x0 / ocrScale;
-                const y = word.bbox.y0 / ocrScale;
-                const w = (word.bbox.x1 - word.bbox.x0) / ocrScale;
-                const h = (word.bbox.y1 - word.bbox.y0) / ocrScale;
+                let x = word.bbox.x0 / ocrScale;
+                let y = word.bbox.y0 / ocrScale;
+                let w = (word.bbox.x1 - word.bbox.x0) / ocrScale;
+                let h = (word.bbox.y1 - word.bbox.y0) / ocrScale;
+
+                // Transform coordinates if the page was originally rotated
+                if (pageRotation === 90) {
+                    const tempX = x;
+                    x = displayViewport.width - (y + h);
+                    y = tempX;
+                    const tempW = w;
+                    w = h;
+                    h = tempW;
+                } else if (pageRotation === 180) {
+                    x = displayViewport.width - (x + w);
+                    y = displayViewport.height - (y + h);
+                } else if (pageRotation === 270) {
+                    const tempX = x;
+                    x = y;
+                    y = displayViewport.height - (tempX + w);
+                    const tempW = w;
+                    w = h;
+                    h = tempW;
+                }
 
                 // Set font size to match box height, capped for safety
                 const fontSize = Math.max(1, Math.min(h, 72));
@@ -191,3 +242,4 @@ async function processPDF(file, fileIndex, totalFiles) {
     statusText.innerText = "Saving " + file.name.replace('.pdf', '_Searchable.pdf') + "...";
     outPdf.save(file.name.replace('.pdf', '_Searchable.pdf'));
 }
+
